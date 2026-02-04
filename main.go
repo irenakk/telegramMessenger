@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/segmentio/kafka-go"
 	"log"
 	"os"
 	"os/signal"
@@ -10,7 +11,6 @@ import (
 	"telegramMessenger/client"
 	"telegramMessenger/config"
 	"telegramMessenger/function"
-
 	"time"
 )
 
@@ -23,15 +23,6 @@ func main() {
 	if cfg.UserServiceURL == "" {
 		log.Fatal("USER_SERVICE_URL is required")
 	}
-	//if cfg.KafkaBrokers == "" {
-	//	log.Fatal("KAFKA_BROKERS is required")
-	//}
-	//if cfg.KafkaTopic == "" {
-	//	log.Fatal("KAFKA_TOPIC is required")
-	//}
-	//if cfg.KafkaGroupID == "" {
-	//	cfg.KafkaGroupID = "notifier-group"
-	//}
 
 	userClient := client.NewUserServiceClient(cfg.UserServiceURL)
 
@@ -43,6 +34,16 @@ func main() {
 	bot.Debug = false
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
+	// Initialize Kafka consumer
+	reader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:  []string{"localhost:9092"},
+		Topic:    "test-topic",
+		GroupID:  "tg-group",
+		MinBytes: 10e3,
+		MaxBytes: 10e6,
+	})
+	defer reader.Close()
+
 	// graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -50,10 +51,7 @@ func main() {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
 	// start updates handler (bind username <-> chat_id)
-	go function.StartTelegramListener(ctx, bot, userClient)
-
-	// start kafka consumer
-	//go function.StartKafkaConsumer(ctx, cfg, bot, userClient)
+	go function.StartTelegramListener(ctx, bot, userClient, reader)
 
 	// wait for signal
 	<-sigs

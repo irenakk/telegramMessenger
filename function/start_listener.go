@@ -2,7 +2,9 @@ package function
 
 import (
 	"context"
+	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/segmentio/kafka-go"
 	"log"
 	"strings"
 	"telegramMessenger/client"
@@ -10,10 +12,35 @@ import (
 )
 
 // Telegram updates processing: /start -> prompt, otherwise treat text as username to bind
-func StartTelegramListener(ctx context.Context, bot *tgbotapi.BotAPI, userClient *client.UserServiceClient) {
+func StartTelegramListener(ctx context.Context, bot *tgbotapi.BotAPI, userClient *client.UserServiceClient, kafkaReader *kafka.Reader) {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 	updates := bot.GetUpdatesChan(u)
+
+	for {
+		msg, err := kafkaReader.ReadMessage(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				break
+			}
+			log.Printf("Ошибка чтения: %v", err)
+			continue
+		}
+
+		fmt.Printf("Получено: partition=%d offset=%d key=%s value=%s\n",
+			msg.Partition, msg.Offset, string(msg.Key), string(msg.Value))
+
+		chatID, err := userClient.GetChatIDByUsername(ctx, string(msg.Key))
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+
+		msgTg := tgbotapi.NewMessage(chatID, string(msg.Value))
+		if _, err := bot.Send(msgTg); err != nil {
+			log.Println("bot send error:", err)
+		}
+	}
 
 	for {
 		select {
